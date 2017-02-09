@@ -141,7 +141,7 @@ static void pageset2_full(void)
 	int i;
 
 	for_each_populated_zone(zone) {
-#ifdef CONFIG_CGROUP_MEM_RES_CTLR
+//#ifdef CONFIG_CGROUP_MEM_RES_CTLR
 		struct mem_cgroup *memcg;
 		struct lruvec *lruvec;
 		/* Root memcg */
@@ -173,7 +173,7 @@ static void pageset2_full(void)
 			/* Next memcg */
 			memcg = mem_cgroup_iter(NULL, memcg, NULL);
 		} while (memcg);
-#else
+/*#else
 		spin_lock_irqsave(&zone->lru_lock, flags);
 		for_each_lru(i) {
 			if (!zone_page_state(zone, NR_LRU_BASE + i))
@@ -189,7 +189,7 @@ static void pageset2_full(void)
 			}
 		}
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
-#endif
+#endif*/
 	}
 }
 
