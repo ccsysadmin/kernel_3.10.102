@@ -558,7 +558,7 @@ static void mlog_procinfo(void)
 		goto collect_proc_mem_info;
 
 		/* skip root user */
-		if (cred->uid == AID_ROOT)
+		if (cred->uid.val == KUIDT_INIT(AID_ROOT).val)
 			goto unlock_continue;
 
 		real_parent = rcu_dereference(p->real_parent);
@@ -572,7 +572,7 @@ static void mlog_procinfo(void)
 
 		if (oom_score_adj == -16) {
 			/* only keep system server */
-			if (cred->uid != AID_SYSTEM)
+			if (cred->uid.val != KUIDT_INIT(AID_SYSTEM).val)
 				goto unlock_continue;
 		}
 

@@ -626,7 +626,7 @@ static int mtk_mdm_proc_mdinfoex_threshold_read(struct seq_file *m, void *v)
 
 static int mtk_mdm_proc_mdinfoex_threshold_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, mtk_mdm_proc_mdinfoex_threshold_read, NULL);
+	return single_open(file, mtk_mdm_proc_mdinfoexs_threshold_read, NULL);
 }
 
 static const struct file_operations mtk_mdm_proc_mdinfoex_threshold_fops = {
@@ -665,9 +665,9 @@ static int __init mtk_mdm_txpwr_init(void)
 				&mtk_mdm_proc_mdinfo_fops);
         if (entry) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-			proc_set_user(entry, 0, 1000);
+			proc_set_user(entry, KUIDT_INIT(0), KGIDT_INIT(1000));
 #else
-			entry->gid = 1000;
+			entry->gid = KGIDT_INIT(1000);
 #endif
         }
 
@@ -676,9 +676,9 @@ static int __init mtk_mdm_txpwr_init(void)
 				&mtk_mdm_proc_mdinfoex_fops);
         if (entry) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-			proc_set_user(entry, 0, 1000);
+			proc_set_user(entry, KUIDT_INIT(0), KGIDT_INIT(1000));
 #else
-			entry->gid = 1000;
+			entry->gid = KGIDT_INIT(1000);
 #endif
         }
 
@@ -687,9 +687,9 @@ static int __init mtk_mdm_txpwr_init(void)
 				&mtk_mdm_proc_mdinfoex_threshold_fops);
         if (entry) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-			proc_set_user(entry, 0, 1000);
+			proc_set_user(entry, KGIDT_INIT(1000));
 #else
-            entry->gid = 1000;
+            entry->gid = KGIDT_INIT(1000);
 #endif
         }
 #endif

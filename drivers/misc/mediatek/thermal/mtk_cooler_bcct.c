@@ -395,9 +395,9 @@ static int __init mtk_cooler_bcct_init(void)
 						                   __func__);
 		} else {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-            proc_set_user(entry, 0, 1000);
+            proc_set_user(entry, KUIDT_INIT(0), KGIDT_INIT(1000));
 #else
-            entry->gid = 1000;
+            entry->gid = KGIDT_INIT(1000);
 #endif
         }
 	}

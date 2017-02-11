@@ -49,8 +49,8 @@ const struct cred * override_fsids(struct sdcardfs_sb_info* sbi)
 	if (!cred) 
 		return NULL; 
 
-	cred->fsuid = sbi->options.fs_low_uid;
-	cred->fsgid = sbi->options.fs_low_gid;
+	cred->fsuid.val = sbi->options.fs_low_uid;
+	cred->fsgid.val = sbi->options.fs_low_gid;
 	/*lenovo-sw jixj 2015.11.29 add begin for selinux merge from moto*/
 	sdcardfs_override_secid(sbi, cred);
 	/*lenovo-sw jixj 2015.11.29 add end*/

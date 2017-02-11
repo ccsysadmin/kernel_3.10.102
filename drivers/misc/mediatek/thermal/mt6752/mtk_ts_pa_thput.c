@@ -638,7 +638,7 @@ static int __init mtk_mdm_txpwr_init(void)
 				&mtk_mdm_proc_mdinfo_fops);
 		if (entry) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-			proc_set_user(entry, 0, 1000);
+			proc_set_user(entry,KUIDT_INIT(0), KGIDT_INIT(1000));
 #else
 			entry->gid = 1000;
 #endif
@@ -649,9 +649,9 @@ static int __init mtk_mdm_txpwr_init(void)
 				&mtk_mdm_proc_mdinfoex_fops);
 		if (entry) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-			proc_set_user(entry, 0, 1000);
+			proc_set_user(entry, KUIDT_INIT(0), KGIDT_INIT(1000));
 #else
-			entry->gid = 1000;
+			entry->gid = KGIDT_INIT(1000);
 #endif
 		}
 
@@ -660,9 +660,9 @@ static int __init mtk_mdm_txpwr_init(void)
 				&mtk_mdm_proc_mdinfoex_threshold_fops);
 		if (entry) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-			proc_set_user(entry, 0, 1000);
+			proc_set_user(entry, KUIDT_INIT(0), KGIDT_INIT(1000));
 #else
-			entry->gid = 1000;
+			entry->gid = KGIDT_INIT(1000);
 #endif
 		}
 #endif

@@ -523,13 +523,13 @@ INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzB
 		return -2;
 	}
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29))
-	orig_uid = cred->fsuid;
-	orig_gid = cred->fsgid;
-	cred->fsuid = cred->fsgid = 0;
+	orig_uid = cred->fsuid.val;
+	orig_gid = cred->fsgid.val;
+	cred->fsuid.val = cred->fsgid.val = 0;
 #else
-	orig_uid = current->fsuid;
-	orig_gid = current->fsgid;
-	current->fsuid = current->fsgid = 0;
+	orig_uid = current->fsuid.val;
+	orig_gid = current->fsgid.val;
+	current->fsuid.val = current->fsgid.val = 0;
 #endif
 
 	set_fs(get_ds());
@@ -539,11 +539,11 @@ INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzB
 	set_fs(orig_fs);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29))
-	cred->fsuid = orig_uid;
-	cred->fsgid = orig_gid;
+	cred->fsuid.val = orig_uid;
+	cred->fsgid.val = orig_gid;
 #else
-	current->fsuid = orig_uid;
-	current->fsgid = orig_gid;
+	current->fsuid.val = orig_uid;
+	current->fsgid.val = orig_gid;
 #endif
 
 	if (iRet > 0) {
