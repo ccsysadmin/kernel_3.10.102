@@ -307,3 +307,7 @@ obj-$(CONFIG_MTK_MULTIBRIDGE_SUPPORT) += multibridge/
 #Classic DRM
 $(info "CONFIG_TRUSTONIC_TEE_SUPPORT = $(CONFIG_TRUSTONIC_TEE_SUPPORT)")
 obj-$(CONFIG_TRUSTONIC_TEE_SUPPORT) += secwidevine/
+
+obj-y += hall/
+
+

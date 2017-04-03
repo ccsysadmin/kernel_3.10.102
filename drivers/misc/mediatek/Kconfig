@@ -214,7 +214,17 @@ config MTK_TC7_FEATURE
 config MTK_TC1_FM_AT_SUSPEND
 	bool "MTK_TC1_FM_AT_SUSPEND"
 	default n
+	
+config CUSTOM_KERNEL_HALL
+	string "CUSTOM_KERNEL_HALL"
+	help
+	  To choose kernel HALL driver name 
 
+config KERNEL_HALL_MAD_SUPPORT
+	string "KERNEL_HALL_AOSP_SUPPORT"
+	help
+	  To choose kernel HALL driver on non MAD roms 
+	  
 config MTK_CLKMGR
 	bool "Mediatek proprietary clock management"
 	default n
@@ -228,6 +238,26 @@ config MTK_CLKMGR
 config MTK_ENABLE_SPM_CHANGE_PMIC_MODE
 	bool "Mediatek spm pmic mode"
 	default n
+
+config MTK_CPU_OC
+	bool "Mediatek CPU overclock"
+	default n
+
+config MTK_DVFS_CONTROL
+	bool "CPU DVFS interface"
+	depends on MTK_CPU_OC
+	default n
+
+config MTK_GPU_OC
+	bool "Mediatek GPU overclock"
+	default n
+
+config MTK_GPU_FREQT
+	int "Value of GPU_DVFS_FREQT"
+	depends on MTK_GPU_OC
+	default 819000
+	---help---
+	  Calculated this value from PLL settings
 
 source "drivers/misc/mediatek/Kconfig.kernel"
 source "drivers/misc/mediatek/Kconfig.drivers"
