@@ -68,11 +68,10 @@ struct inet6_ifaddr {
 	struct hlist_node	addr_lst;
 	struct list_head	if_list;
 
-#ifdef CONFIG_IPV6_PRIVACY
 	struct list_head	tmp_list;
 	struct inet6_ifaddr	*ifpub;
 	int			regen_count;
-#endif
+
 	bool			tokenized;
 
 	struct rcu_head		rcu;
@@ -185,11 +184,9 @@ struct inet6_dev {
 	__u32			if_flags;
 	int			dead;
 
-#ifdef CONFIG_IPV6_PRIVACY
 	u8			rndid[8];
 	struct timer_list	regen_timer;
 	struct list_head	tempaddr_list;
-#endif
 
 	struct in6_addr		token;
 
@@ -199,6 +196,7 @@ struct inet6_dev {
 	struct ipv6_devstat	stats;
 
 	struct timer_list	rs_timer;
+	__s32			rs_interval;	/* in jiffies */
 	__u8			rs_probes;
 
 	unsigned long		tstamp; /* ipv6InterfaceTable update timestamp */

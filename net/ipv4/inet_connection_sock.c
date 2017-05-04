@@ -181,6 +181,13 @@ have_snum:
 		head = &hashinfo->bhash[inet_bhashfn(net, snum,
 				hashinfo->bhash_size)];
 		spin_lock(&head->lock);
+
+		if (inet_is_reserved_local_port(snum) &&
+		    !sysctl_reserved_port_bind) {
+			ret = 1;
+			goto fail_unlock;
+		}
+
 		inet_bind_bucket_for_each(tb, &head->chain)
 			if (net_eq(ib_net(tb), net) && tb->port == snum)
 				goto tb_found;
@@ -423,7 +430,7 @@ struct dst_entry *inet_csk_route_req(struct sock *sk,
 			   flags,
 			   (opt && opt->opt.srr) ? opt->opt.faddr : ireq->rmt_addr,
 			   ireq->loc_addr, ireq->rmt_port, inet_sk(sk)->inet_sport,
-			   sock_i_uid(sk));
+			   sk->sk_uid);
 	security_req_classify_flow(req, flowi4_to_flowi(fl4));
 	rt = ip_route_output_flow(net, fl4, sk);
 	if (IS_ERR(rt))
@@ -460,7 +467,7 @@ struct dst_entry *inet_csk_route_child_sock(struct sock *sk,
 			   sk->sk_protocol, inet_sk_flowi_flags(sk),
 			   (opt && opt->opt.srr) ? opt->opt.faddr : ireq->rmt_addr,
 			   ireq->loc_addr, ireq->rmt_port, inet_sk(sk)->inet_sport,
-			   sock_i_uid(sk));
+			   sk->sk_uid);
 	security_req_classify_flow(req, flowi4_to_flowi(fl4));
 	rt = ip_route_output_flow(net, fl4, sk);
 	if (IS_ERR(rt))
@@ -774,7 +781,7 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 	if (!sk->sk_prot->get_port(sk, inet->inet_num)) {
 		inet->inet_sport = htons(inet->inet_num);
 		#ifdef CONFIG_MTK_NET_LOGGING 
-        printk(KERN_WARNING "[mtk_net][socket] inet_csk_listen_start inet->inet_sport:%d,inet->inet_num:%d",inet->inet_sport,inet->inet_num);
+        pr_debug(KERN_WARNING "[mtk_net][socket] inet_csk_listen_start inet->inet_sport:%d,inet->inet_num:%d",inet->inet_sport,inet->inet_num);
         #endif
 		sk_dst_reset(sk);
 		sk->sk_prot->hash(sk);

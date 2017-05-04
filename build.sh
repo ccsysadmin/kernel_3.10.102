@@ -7,5 +7,5 @@ make clean
 make mrproper
 make h560_defconfig
 make xconfig
-make -j7
+make -j7 &> results.txt
 #abootimg --create boot.img -f bootimg.cfg -k $IMAGEGZ_DTB -r initrd.img

@@ -3548,16 +3548,24 @@ void __init tcp_init(void)
 static int tcp_is_local(struct net *net, __be32 addr) {
 	struct rtable *rt;
 	struct flowi4 fl4 = { .daddr = addr };
+	int is_local;
 	rt = ip_route_output_key(net, &fl4);
 	if (IS_ERR_OR_NULL(rt))
 		return 0;
-	return rt->dst.dev && (rt->dst.dev->flags & IFF_LOOPBACK);
+
+	is_local = rt->dst.dev && (rt->dst.dev->flags & IFF_LOOPBACK);
+	ip_rt_put(rt);
+	return is_local;
 }
 
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 static int tcp_is_local6(struct net *net, struct in6_addr *addr) {
 	struct rt6_info *rt6 = rt6_lookup(net, addr, addr, 0, 0);
-	return rt6 && rt6->dst.dev && (rt6->dst.dev->flags & IFF_LOOPBACK);
+	int is_local;
+
+	is_local = rt6 && rt6->dst.dev && (rt6->dst.dev->flags & IFF_LOOPBACK);
+	ip6_rt_put(rt6);
+	return is_local;
 }
 #endif
 
@@ -3571,9 +3579,7 @@ int tcp_nuke_addr(struct net *net, struct sockaddr *addr)
 	int family = addr->sa_family;
 	unsigned int bucket;
 	
-	/*mtk_net:debug log*/
-  int count = 0; 
-	struct in_addr *in;
+	struct in_addr *in = NULL;
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 	struct in6_addr *in6 = NULL ;
 #endif
@@ -3586,8 +3592,6 @@ int tcp_nuke_addr(struct net *net, struct sockaddr *addr)
 	} else {
 		return -EAFNOSUPPORT;
 	}
-		/*mtk_net:debug log*/
-  printk(KERN_INFO "[mtk_net][tcp]tcp_nuke_addr: tcp_hashinfo.ehash_mask = %d\n",tcp_hashinfo.ehash_mask);
 	for (bucket = 0; bucket <= tcp_hashinfo.ehash_mask; bucket++) {
 		struct hlist_nulls_node *node;
 		struct sock *sk;
@@ -3634,18 +3638,20 @@ restart:
 			sock_hold(sk);
 			spin_unlock_bh(lock);
 
+			lock_sock(sk);
+			// TODO:
+			// Check for SOCK_DEAD again, it could have changed.
+			// Add a write barrier, see tcp_reset().
 			local_bh_disable();
-			bh_lock_sock(sk);
-			sk->sk_err = ETIMEDOUT;
-			sk->sk_error_report(sk);
-			count++;
-            /*mtk_net: skip closed sk*/
-			if(sk->sk_state != TCP_CLOSE && sk->sk_shutdown != SHUTDOWN_MASK)
-				{
-					printk(KERN_INFO "[mtk_net][tcp]skip ALPS01866438 Google Issue!\n");			 
-				}
-			tcp_done(sk);
-			bh_unlock_sock(sk);
+
+			if (!sock_flag(sk, SOCK_DEAD)) {
+				smp_wmb();  /* be consistent with tcp_reset */
+				sk->sk_err = ETIMEDOUT;
+				sk->sk_error_report(sk);
+				tcp_done(sk);
+			}
+
+			release_sock(sk);
 			local_bh_enable();
 			sock_put(sk);
 
@@ -3653,6 +3659,6 @@ restart:
 		}
 		spin_unlock_bh(lock);
 	}
-	printk(KERN_INFO "[mtk_net][tcp]tcp_nuke_addr : count = %d\n",count);
+
 	return 0;
 }

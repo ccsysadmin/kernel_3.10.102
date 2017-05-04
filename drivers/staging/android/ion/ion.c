@@ -1,5 +1,4 @@
 /*
-
  * drivers/gpu/ion/ion.c
  *
  * Copyright (C) 2011 Google, Inc.
@@ -16,6 +15,8 @@
  */
 
 #include <linux/device.h>
+#include <linux/atomic.h>
+#include <linux/err.h>
 #include <linux/file.h>
 #include <linux/freezer.h>
 #include <linux/fs.h>
@@ -41,7 +42,7 @@
 #include "compat_ion.h"
 #include "ion_profile.h"
 
-#define ION_DEBUG 0 
+#define ION_DEBUG 0
 #if ION_DEBUG
 #include <linux/ion_drv.h>
 #include "ion_debug.h"
@@ -73,8 +74,8 @@ struct ion_device {
 	struct mutex buffer_lock;
 	struct rw_semaphore lock;
 	struct plist_head heaps;
-	long (*custom_ioctl) (struct ion_client *client, unsigned int cmd,
-			      unsigned long arg);
+	long (*custom_ioctl)(struct ion_client *client, unsigned int cmd,
+			     unsigned long arg);
 	struct rb_root clients;
 	struct dentry *debug_root;
 	struct dentry *heaps_debug_root;
@@ -112,13 +113,13 @@ struct ion_client {
 };
 
 struct ion_handle_debug {
-    pid_t pid;
-    pid_t tgid;
-    unsigned int backtrace[BACKTRACE_SIZE];
-    unsigned int backtrace_num;
+	pid_t pid;
+	pid_t tgid;
+	unsigned int backtrace[BACKTRACE_SIZE];
+	unsigned int backtrace_num;
 };
 
-/**
+/*
  * ion_handle - a client local reference to a buffer
  * @ref:		reference count
  * @client:		back pointer to the client the buffer resides in
@@ -132,14 +133,15 @@ struct ion_handle_debug {
  */
 struct ion_handle {
 	struct kref ref;
+	unsigned int user_ref_count;
 	struct ion_client *client;
 	struct ion_buffer *buffer;
 	struct rb_node node;
 	unsigned int kmap_cnt;
 	int id;
 #if ION_RUNTIME_DEBUGGER
-        struct ion_handle_debug dbg;
-#endif        
+	struct ion_handle_debug dbg;
+#endif
 };
 
 #endif
@@ -151,13 +153,13 @@ static void ion_debug_create_db(struct dentry *root);
 #endif
 
 static int ion_debug_kern_rec(struct ion_client *client,
-                            struct ion_buffer *buffer,
-                            struct ion_handle * handle,
-                            unsigned int action,
-                            unsigned int address_type,
-                            unsigned int address,
-                            unsigned length,
-                            int fd);
+			      struct ion_buffer *buffer,
+			      struct ion_handle *handle,
+			      unsigned int action,
+			      unsigned int address_type,
+			      unsigned int address,
+			      unsigned length,
+			      int fd);
 
 bool ion_buffer_fault_user_mappings(struct ion_buffer *buffer)
 {
@@ -230,7 +232,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 
 	buffer = kzalloc(sizeof(struct ion_buffer), GFP_KERNEL);
 	if (!buffer) {
-                IONMSG("%s kzalloc failed, buffer is null.\n", __func__);
+		IONMSG("%s kzalloc failed, buffer is null.\n", __func__);
 		return ERR_PTR(-ENOMEM);
         }
 
@@ -260,9 +262,8 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		table = ERR_PTR(-EINVAL);
 	if (IS_ERR(table)) {
                 IONMSG("%s table is err 0x%pK.\n", __func__, table);
-		heap->ops->free(buffer);
-		kfree(buffer);
-		return ERR_PTR(PTR_ERR(table));
+        ret = -EINVAL;
+        goto err1;
 	}
 	buffer->sg_table = table;
 	if (ion_buffer_fault_user_mappings(buffer)) {
@@ -274,7 +275,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		if (!buffer->pages) {
                         IONMSG("%s vamlloc failed pages is null.\n", __func__);
 			ret = -ENOMEM;
-			goto err1;
+			goto err;
 		}
 
 		for_each_sg(table->sgl, sg, table->nents, i) {
@@ -283,9 +284,6 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 			for (j = 0; j < sg->length / PAGE_SIZE; j++)
 				buffer->pages[k++] = page++;
 		}
-
-		if (ret)
-			goto err;
 	}
 
 	buffer->dev = dev;
@@ -322,10 +320,8 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 
 err:
 	heap->ops->unmap_dma(heap, buffer);
-	heap->ops->free(buffer);
 err1:
-	if (buffer->pages)
-		vfree(buffer->pages);
+    heap->ops->free(buffer);
 err2:
 	kfree(buffer);
 	return ERR_PTR(ret);
@@ -455,13 +451,18 @@ static void ion_handle_get(struct ion_handle *handle)
 	kref_get(&handle->ref);
 }
 
+/* Must hold the client lock */
+static struct ion_handle* ion_handle_get_check_overflow(struct ion_handle *handle)
+{
+	if (atomic_read(&handle->ref.refcount) + 1 == 0)
+		return ERR_PTR(-EOVERFLOW);
+	ion_handle_get(handle);
+	return handle;
+}
+
 static int ion_handle_put_nolock(struct ion_handle *handle)
 {
-	int ret;
-
-	ret = kref_put(&handle->ref, ion_handle_destroy);
-
-	return ret;
+	return kref_put(&handle->ref, ion_handle_destroy);
 }
 
 int ion_handle_put(struct ion_handle *handle)
@@ -472,6 +473,48 @@ int ion_handle_put(struct ion_handle *handle)
 	mutex_lock(&client->lock);
 	ret = ion_handle_put_nolock(handle);
 	mutex_unlock(&client->lock);
+
+	return ret;
+}
+
+/* Must hold the client lock */
+static void user_ion_handle_get(struct ion_handle *handle)
+{
+	if (handle->user_ref_count++ == 0)
+		kref_get(&handle->ref);
+}
+
+/* Must hold the client lock */
+static struct ion_handle *user_ion_handle_get_check_overflow(struct ion_handle *handle)
+{
+	if (handle->user_ref_count + 1 == 0)
+		return ERR_PTR(-EOVERFLOW);
+	user_ion_handle_get(handle);
+	return handle;
+}
+
+/* passes a kref to the user ref count.
+ * We know we're holding a kref to the object before and
+ * after this call, so no need to reverify handle. */
+static struct ion_handle *pass_to_user(struct ion_handle *handle)
+{
+	struct ion_client *client = handle->client;
+	struct ion_handle *ret;
+
+	mutex_lock(&client->lock);
+	ret = user_ion_handle_get_check_overflow(handle);
+	ion_handle_put_nolock(handle);
+	mutex_unlock(&client->lock);
+	return ret;
+}
+
+/* Must hold the client lock */
+static int user_ion_handle_put_nolock(struct ion_handle *handle)
+{
+	int ret;
+
+	if (--handle->user_ref_count == 0)
+		ret = ion_handle_put_nolock(handle);
 
 	return ret;
 }
@@ -500,9 +543,9 @@ static struct ion_handle *ion_handle_get_by_id_nolock(struct ion_client *client,
 
 	handle = idr_find(&client->idr, id);
 	if (handle)
-		ion_handle_get(handle);
+		return ion_handle_get_check_overflow(handle);
 
-	return handle ? handle : ERR_PTR(-EINVAL);
+	return ERR_PTR(-EINVAL);
 }
 
 struct ion_handle *ion_handle_get_by_id(struct ion_client *client,
@@ -648,7 +691,7 @@ struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
         IONMSG("%s handle is error 0x%p", __func__, handle);
 	return handle;
     }
-    
+
     ion_debug_kern_rec(client, handle->buffer, handle, ION_FUNCTION_ALLOC, 0, 0, 0, 0);
 
     return handle;
@@ -668,6 +711,25 @@ static void ion_free_nolock(struct ion_client *client, struct ion_handle *handle
 		return;
 	}
 	ion_handle_put_nolock(handle);
+}
+
+/* Must hold the client lock */
+static void user_ion_free_nolock(struct ion_client *client, struct ion_handle *handle)
+{
+	bool valid_handle;
+
+	BUG_ON(client != handle->client);
+
+	valid_handle = ion_handle_validate(client, handle);
+	if (!valid_handle) {
+		WARN(1, "%s: invalid handle passed to free.\n", __func__);
+		return;
+	}
+	if (handle->user_ref_count == 0) {
+		WARN(1, "%s: User does not have access!\n", __func__);
+		return;
+	}
+	user_ion_handle_put_nolock(handle);
 }
 
 void ion_free(struct ion_client *client, struct ion_handle *handle)
@@ -706,7 +768,7 @@ int ion_phys(struct ion_client *client, struct ion_handle *handle,
 	ret = buffer->heap->ops->phys(buffer->heap, buffer, addr, len);
 
 	MMProfileLogEx(ION_MMP_Events[PROFILE_GET_PHYS], MMProfileFlagEnd, buffer->size, *addr);
-    
+
 	return ret;
 }
 EXPORT_SYMBOL(ion_phys);
@@ -824,6 +886,34 @@ void ion_unmap_kernel(struct ion_client *client, struct ion_handle *handle)
 }
 EXPORT_SYMBOL(ion_unmap_kernel);
 
+static struct mutex debugfs_mutex;
+static struct rb_root *ion_root_client;
+static int is_client_alive(struct ion_client *client)
+{
+	struct rb_node *node;
+	struct ion_client *tmp;
+	struct ion_device *dev;
+
+	node = ion_root_client->rb_node;
+	dev = container_of(ion_root_client, struct ion_device, clients);
+
+	down_read(&dev->lock);
+	while (node) {
+		tmp = rb_entry(node, struct ion_client, node);
+		if (client < tmp) {
+			node = node->rb_left;
+		} else if (client > tmp) {
+			node = node->rb_right;
+		} else {
+			up_read(&dev->lock);
+			return 1;
+		}
+	}
+
+	up_read(&dev->lock);
+	return 0;
+}
+
 static int ion_client_validate(struct ion_device *dev,
 				struct ion_client *client)
 {
@@ -858,6 +948,14 @@ static int ion_debug_client_show(struct seq_file *s, void *unused)
 
         seq_printf(s, "%16.s %8.s %8.s %8.s %8.s %8.s\n", "heap_name","pid", "size", "handle_count","handle","buffer");
 
+	mutex_lock(&debugfs_mutex);
+	if (!is_client_alive(client)) {
+		seq_printf(s, "ion_client 0x%p dead, can't dump its buffers\n",
+			   client);
+		mutex_unlock(&debugfs_mutex);
+		return 0;
+	}
+
 	mutex_lock(&client->lock);
 	for (n = rb_first(&client->handles); n; n = rb_next(n)) {
 		struct ion_handle *handle = rb_entry(n, struct ion_handle,
@@ -868,11 +966,12 @@ static int ion_debug_client_show(struct seq_file *s, void *unused)
 			names[id] = handle->buffer->heap->name;
 		sizes[id] += handle->buffer->size;
 
-	        struct ion_buffer *buffer = handle->buffer;
-	        seq_printf(s, "%16.s %3d %8zu %3d %p %p.\n", buffer->heap->name, 
-                               client->pid, buffer->size, buffer->handle_count, handle, buffer);
+		struct ion_buffer *buffer = handle->buffer;
+		seq_printf(s, "%16.s %3d %8zu %3d %p %p.\n", buffer->heap->name,
+			       client->pid, buffer->size, buffer->handle_count, handle, buffer);
 	}
 	mutex_unlock(&client->lock);
+	mutex_unlock(&debugfs_mutex);
 
         seq_printf(s, "----------------------------------------------------\n");
 
@@ -1018,7 +1117,7 @@ struct ion_client *ion_client_create(struct ion_device *dev,
     }
 
     ion_debug_kern_rec(client, NULL, NULL, ION_FUNCTION_CREATE_CLIENT, 0, 0, 0, 0);
-    
+
     return client;
 }
 EXPORT_SYMBOL(ion_client_create);
@@ -1029,6 +1128,7 @@ void __ion_client_destroy(struct ion_client *client, int from_kern)
 	struct rb_node *n;
 
 	pr_debug("%s: %d\n", __func__, __LINE__);
+	mutex_lock(&debugfs_mutex);
 	while ((n = rb_first(&client->handles))) {
 		struct ion_handle *handle = rb_entry(n, struct ion_handle,
 						     node);
@@ -1057,6 +1157,7 @@ void __ion_client_destroy(struct ion_client *client, int from_kern)
 #endif
 
 	kfree(client);
+	mutex_unlock(&debugfs_mutex);
 }
 
 void ion_client_destroy(struct ion_client *client)
@@ -1409,7 +1510,7 @@ struct ion_handle *__ion_import_dma_buf(struct ion_client *client, int fd, int f
 	/* if a handle exists for this buffer just take a reference to it */
 	handle = ion_handle_lookup(client, buffer);
 	if (!IS_ERR(handle)) {
-		ion_handle_get(handle);
+		handle = ion_handle_get_check_overflow(handle);
 		mutex_unlock(&client->lock);
 		goto end;
 	}
@@ -1532,6 +1633,7 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return ret;
                 }
 
+		pass_to_user(handle);
 		data.allocation.handle = handle->id;
 
 		cleanup_handle = handle;
@@ -1547,7 +1649,7 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			mutex_unlock(&client->lock);
 			return PTR_ERR(handle);
 		}
-		ion_free_nolock(client, handle);
+		user_ion_free_nolock(client, handle);
 		ion_handle_put_nolock(handle);
 		mutex_unlock(&client->lock);
 		break;
@@ -1575,13 +1677,16 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	{
 		struct ion_handle *handle;
 		handle = __ion_import_dma_buf(client, data.fd.fd, 0);
-		if (IS_ERR(handle))
-		{
+		if (IS_ERR(handle)) {
 			ret = PTR_ERR(handle);
 			IONMSG("ion_import fail: fd=%d, ret=%d\n", data.fd.fd, ret);
+		} else {
+			handle = pass_to_user(handle);
+			if (IS_ERR(handle))
+				ret = PTR_ERR(handle);
+			else
+				data.handle.handle = handle->id;
 		}
-		else
-			data.handle.handle = handle->id;
 		break;
 	}
 	case ION_IOC_SYNC:
@@ -1607,8 +1712,12 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	if (dir & _IOC_READ) {
 		if (copy_to_user((void __user *)arg, &data, _IOC_SIZE(cmd))) {
-			if (cleanup_handle) 
-				ion_free(client, cleanup_handle);
+			if (cleanup_handle) {
+				mutex_lock(&client->lock);
+				user_ion_free_nolock(client, cleanup_handle);
+				ion_handle_put_nolock(cleanup_handle);
+				mutex_unlock(&client->lock);
+			}
                         IONMSG("ion_ioctl copy_to_user fail! cmd = %d, n = %d.\n", cmd, _IOC_SIZE(cmd));
 			return -EFAULT;
 		}
@@ -1682,6 +1791,7 @@ static int ion_debug_heap_show(struct seq_file *s, void *unused)
 	seq_puts(s, "----------------------------------------------------\n");
 
 	down_read(&dev->lock);
+	mutex_lock(&debugfs_mutex);
 	for (n = rb_first(&dev->clients); n; n = rb_next(n)) {
 		struct ion_client *client = rb_entry(n, struct ion_client,
 						     node);
@@ -1700,6 +1810,7 @@ static int ion_debug_heap_show(struct seq_file *s, void *unused)
 		}
 	}
 	up_read(&dev->lock);
+	mutex_unlock(&debugfs_mutex);
 
 	seq_puts(s, "----------------------------------------------------\n");
 	seq_puts(s, "orphaned allocations (info is from last known client):\n");
@@ -1925,6 +2036,8 @@ debugfs_done:
 	/* Create ION Debug DB Root */
 	ion_debug_create_db(idev->debug_root);
 #endif
+	ion_root_client = &idev->clients;
+	mutex_init(&debugfs_mutex);
 	return idev;
 }
 
@@ -1972,7 +2085,7 @@ void __init ion_reserve(struct ion_platform_data *data)
 }
 
 //============================================================================
-// helper functions 
+// helper functions
 //============================================================================
 
 struct ion_handle* ion_drv_get_handle(struct ion_client* client, int user_handle, struct ion_handle* kernel_handle, int from_kernel)
@@ -2022,7 +2135,7 @@ int ion_device_destory_heaps(struct ion_device *dev, int need_lock)
 		plist_del(heap, &dev->heaps);
 		ion_heap_destroy(heap);
 	}
-	
+
 	if(need_lock)
 		up_write(&dev->lock);
 	return 0;
@@ -2042,10 +2155,10 @@ struct ion_heap * ion_drv_get_heap(struct ion_device *dev, int heap_id, int need
 			break;
 		}
 	}
-	
+
 	if(need_lock)
 		up_write(&dev->lock);
-	
+
 	return heap;
 }
 //=============================================================================================
@@ -2106,7 +2219,7 @@ static int ion_debug_kern_rec(struct ion_client *client,
 static void *ion_get_list_from_buffer(struct ion_buffer *buf, unsigned int type)
 {
 	struct ion_buffer_record *buf_rec = NULL;
-	
+
 	/* Get the inuse buffer record */
 	buf_rec = ion_get_inuse_buffer_record();
 	if (!buf_rec) {
@@ -2171,11 +2284,11 @@ static void *ion_get_client_record(struct ion_client *client)
         /* Go through it */
         do {
                 /* We only need to find out the record with corresponding buffer */
-                if ((client_rec->tracking_info.from_kernel)&&(client_rec->tracking_info.recordID.client_address == (unsigned int)client) && (client_rec->tracking_info.recordID.group_pid == client->pid)) 
+		if ((client_rec->tracking_info.from_kernel)&&(client_rec->tracking_info.recordID.client_address == (unsigned int)client) && (client_rec->tracking_info.recordID.group_pid == client->pid))
 		{
-			return (void *)client_rec;	
+			return (void *)client_rec;
 		}
-		else if ((!client_rec->tracking_info.from_kernel)&&(client_rec->tracking_info.recordID.client_address == (unsigned int)client) && (client_rec->tracking_info.recordID.pid == client->pid)) 
+		else if ((!client_rec->tracking_info.from_kernel)&&(client_rec->tracking_info.recordID.client_address == (unsigned int)client) && (client_rec->tracking_info.recordID.pid == client->pid))
 		{
                         return (void *)client_rec;
                 }
@@ -2199,7 +2312,7 @@ static int ion_debugdb_show_backtrace(struct seq_file *s, struct ion_record_basi
 	if (ti == NULL) {
 		return 0;
 	}
-	
+
 	if (sbt == ALLOCATE_BACKTRACE_INFO) {
 		tmp = (ObjectEntry *)ti->allocate_backtrace;
 		if (tmp == NULL)
@@ -2255,7 +2368,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 	 *
 	 *  Based on above observations, we can using following rules to change raw_key to key & vice versa.
 	 *  1. For processes, we use ((dbcl_types << 16) | raw_key) as the key, in which raw_key equals Process ID.
-	 
+
 	 *  (No-use)2. For kernel modules, we use (raw_key | dbcl_types) as the key, in which raw_key is the virtual address the module is resident in.
 	 *  (No-use)3. For other kernel parts, we use dbcl_types as the key.
 	 *
@@ -2274,7 +2387,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 
 	/* Which type */
 	type = key >> 16;
-	
+
 	/* Which process */
 	raw_key = key & 0xffff;
 	seq_printf(s, "Process [%d]\n", raw_key);
@@ -2303,13 +2416,13 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 							buffer = handle->buffer;
 							mutex_lock(&buffer->lock);
 							seq_printf(s, "%10s[%2d] heap(%s) flags(%d) size(%d) kmap_cnt(%d) kvaddr(0x%x)\n",
-		   						      "buffer", buffer_cnt++, buffer->heap->name, (unsigned int)buffer->flags, 
+		   						      "buffer", buffer_cnt++, buffer->heap->name, (unsigned int)buffer->flags,
 								      buffer->size, (unsigned int)buffer->kmap_cnt, (unsigned int)buffer->vaddr);
 							mutex_unlock(&buffer->lock);
 						}
 						mutex_unlock(&client->lock);
 					}
-				}	
+				}
 			}
 			break;
 		case DBCL_BUFFER:
@@ -2337,16 +2450,16 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 							seq_printf(s, "%s[%2d] size(%d) %12p\n", "buffer", buffer_cnt++, buffer->size, buffer);
 							mutex_unlock(&buffer->lock);
 							/* Lv2 - all buffer-usage */
-							
+
 							usg_rec = ion_get_list_from_buffer(buffer, BUFFER_ALLOCATION_LIST);
 							if(usg_rec != NULL)
 								seq_printf(s, "%s\n","  <BUFFER_ALLOCATION_LIST>");
 							while (!!usg_rec) {
 								seq_printf(s, "%s [0x%x] %10s [%d] (%s [%d]) \n","    client",
 													usg_rec->tracking_info.recordID.client_address,
-													"Process", 
+													"Process",
 													usg_rec->tracking_info.recordID.pid,
-													"GroupLeader", 
+													"GroupLeader",
 													usg_rec->tracking_info.recordID.group_pid);
 								/* Show buffer allocation backtrace */
 								ion_debugdb_show_backtrace(s, &usg_rec->tracking_info, ALLOCATE_BACKTRACE_INFO);
@@ -2360,9 +2473,9 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 							while (!!usg_rec) {
 								seq_printf(s, "%s [0x%x] %10s [%d] \n","    client",
 													usg_rec->tracking_info.recordID.client_address,
-													"Process", 
+													"Process",
 													usg_rec->tracking_info.recordID.pid,
-													"GroupLeader", 
+													"GroupLeader",
 													usg_rec->tracking_info.recordID.group_pid);
 								/* Show buffer free backtrace */
 								ion_debugdb_show_backtrace(s, &usg_rec->tracking_info, RELEASE_BACKTRACE_INFO);
@@ -2378,7 +2491,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 		              	while (buf_rec != NULL) {
                                         /* Allocation */
                                         usg_rec = ion_get_list(LIST_BUFFER,buf_rec, BUFFER_ALLOCATION_LIST);
-                                       
+
                                         while ((!!usg_rec) &&(usg_rec->tracking_info.recordID.pid== raw_key)) {
 						buffer_count++;
 						if(buffer_count == 1)
@@ -2388,7 +2501,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
                                                	seq_printf(s, "%s\n","  <BUFFER_ALLOCATION_LIST>");
                                                 seq_printf(s, "%s [0x%x] %10s [%d] (%s [%d])\n","    client",
 													usg_rec->tracking_info.recordID.client_address,
-													"Process", 
+													"Process",
 													usg_rec->tracking_info.recordID.pid,
                                                                                         		"GroupLeader",
 													usg_rec->tracking_info.recordID.group_pid);
@@ -2406,9 +2519,9 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 						seq_printf(s, "%s\n","  <BUFFER_FREE_LIST>");
                                                 seq_printf(s, "%s [0x%x] %10s [%d] (%s [%d])\n","    client",
 													usg_rec->tracking_info.recordID.client_address,
-													"Process", 
+													"Process",
 													usg_rec->tracking_info.recordID.pid,
-                                                                                        		"GroupLeader", 
+                                                                                        		"GroupLeader",
 													usg_rec->tracking_info.recordID.group_pid);
                                                 /* Show buffer free backtrace */
                                                 ion_debugdb_show_backtrace(s, &usg_rec->tracking_info, RELEASE_BACKTRACE_INFO);
@@ -2422,8 +2535,8 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 			}
 			break;
 		case DBCL_MMAP:
-			/* Lv1 - all buffers 
-			 * Lv2 - all buffer-mmaps 
+			/* Lv1 - all buffers
+			 * Lv2 - all buffer-mmaps
 			 */
 			printk(KERN_INFO "DBCL_MMAP\n");
 			{
@@ -2446,7 +2559,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 							/* Lv2 - all buffer-mmaps */
 							adr_rec = ion_get_list_from_buffer(buffer, ADDRESS_ALLOCATION_LIST);
 							if(adr_rec != NULL)
-							{	
+							{
 							seq_printf(s, "%10s\n","<ADDRESS_ALLOCATION_LIST_IN_KERNELSPACE>");
 							}
 							while (!!adr_rec) {
@@ -2475,7 +2588,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 								/* Next address record */
 								adr_rec = (struct ion_address_usage_record *)ion_get_data_from_record((void *)adr_rec, RECORD_NEXT);
 							}
-						
+
 						}
 						        client_rec = (struct ion_client_usage_record *)ion_get_client_record(client);
                                                         if(client_rec != NULL)
@@ -2483,7 +2596,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
                                                                 adr_rec = ion_get_list_from_process(client_rec->tracking_info.recordID.pid, ADDRESS_ALLOCATION_LIST);
 								if(adr_rec != NULL)
 									seq_printf(s, "%10s\n","<ADDRESS_ALLOCATION_LIST_IN_USERSPACE>");
-                                                        while (!!adr_rec) 
+                                                        while (!!adr_rec)
 							{
                                                                 seq_printf(s, "%10s [%d] - %10s [0x%x]-[0x%x] %10s [%d]\n",
                                                                                 "Process", adr_rec->tracking_info.recordID.pid,
@@ -2496,8 +2609,8 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
                                                                 }
                                                                 adr_rec = ion_get_list_from_process(client_rec->tracking_info.recordID.pid, ADDRESS_FREE_LIST);
                                                                	if(adr_rec != NULL)
-									seq_printf(s, "%10s\n","<ADDRESS_FREE_LIST_IN_USERSPACE>"); 
-                                                        while (!!adr_rec) 
+									seq_printf(s, "%10s\n","<ADDRESS_FREE_LIST_IN_USERSPACE>");
+                                                        while (!!adr_rec)
 							{
                                                                         seq_printf(s, "%10s [%d] - %10s [0x%x]-[0x%x] %10s [%d]\n",
                                                                                 "Process", adr_rec->tracking_info.recordID.pid,
@@ -2572,7 +2685,7 @@ static int ion_debug_dbcl_show(struct seq_file *s, void *unused)
 		default:
 			break;
 	}
-	
+
 	return 0;
 }
 
@@ -2603,7 +2716,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 	struct ion_buffer_record *buf_rec = NULL;
 	struct ion_process_record *process_rec = NULL;
 	struct ion_client_usage_record *client_rec = NULL;
-	
+
 	/* History records */
 	if (type >= (unsigned long)DBIS_DIR) {
 		printk(KERN_INFO "ION Debug History Records\n");
@@ -2647,7 +2760,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 
 	} else {
 		printk(KERN_INFO "ION Debug Non-History Records\n");
-		switch ((enum dbis_types)type) 
+		switch ((enum dbis_types)type)
 		{
 			case DBIS_CLIENTS:
                         {
@@ -2666,7 +2779,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 			case DBIS_FDS:
 			{
 				process_rec = ion_get_inuse_process_usage_record2();
-				break;	
+				break;
 			}
 			case DBIS_PIDS:
 			{
@@ -2703,14 +2816,14 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 						buffer = handle->buffer;
 						mutex_lock(&buffer->lock);
 						seq_printf(s, "%10s[%2d] heap(%s) address(0x%x) flags(%d) size(%d) kmap_cnt(%d) kvaddr(0x%x)\n",
-								"buffer", buffer_cnt++, buffer->heap->name,buffer,buffer->flags, 
+								"buffer", buffer_cnt++, buffer->heap->name,buffer,buffer->flags,
 								buffer->size, buffer->kmap_cnt, buffer->vaddr);
 						mutex_unlock(&buffer->lock);
 					}
 					mutex_unlock(&client->lock);
 					buffer_cnt = 0;
-				}	
-#endif	
+				}
+#endif
 				client_cnt = 0;
 				while(client_rec != NULL)
 				{
@@ -2724,7 +2837,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
                                                 ion_debugdb_show_backtrace(s, &client_rec->tracking_info,RELEASE_BACKTRACE_INFO);
                                         }
 					client_rec = (struct ion_client_usage_record *)client_rec->next;
-				}	
+				}
 			}
 			break;
 		case DBIS_BUFFERS:
@@ -2735,7 +2848,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 #if 0
 				buf_rec = ion_get_inuse_buffer_record();
 #endif
-				while (buf_rec != NULL) 
+				while (buf_rec != NULL)
 				{
 					seq_printf(s, "%8s[%2d][0x%x] buffer structure: 0x%pK size(%d)\n", "buffer", buffer_cnt++,(unsigned int)buf_rec->buffer,buf_rec->buffer_address, buf_rec->buffer->size);
 					/* Allocation */
@@ -2743,11 +2856,11 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 					if(usg_rec)
 					{
 					seq_printf(s, "%30s\n","<BUFFER_ALLOCATION_LIST>");
-					}	
-					while (!!usg_rec) 
+					}
+					while (!!usg_rec)
 					{
 						if(usg_rec->function_type == ION_FUNCTION_ALLOC)
-						{				
+						{
 							seq_printf(s, "%15s [%d] (%s [%d]) %s (0x%x) FUNCTION %s\n","Process", usg_rec->tracking_info.recordID.pid,
 											"GroupLeader", usg_rec->tracking_info.recordID.group_pid,"handle",(unsigned int)usg_rec->handle,"ION_ALLOC");
 						}else
@@ -2846,17 +2959,17 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 				seq_printf(s, "%s\n","<KENREL MAPPING>");
 				mutex_lock(&buffer_lifecycle_mutex);
 				while (buf_rec != NULL) {
-                     			mutex_lock(&buf_rec->ion_address_usage_mutex);                  
+                     			mutex_lock(&buf_rec->ion_address_usage_mutex);
 					/* Mapping */
 					adr_rec = ion_get_list(LIST_BUFFER,buf_rec, ADDRESS_ALLOCATION_LIST);
-					
+
 					/* Unmapping */
                                         adr_rec_free = ion_get_list(LIST_BUFFER,buf_rec, ADDRESS_FREE_LIST);
 					mutex_unlock(&buf_rec->ion_address_usage_mutex);
 					if((adr_rec == NULL)&&(adr_rec_free == NULL))
 					{
 						buf_rec = buf_rec->next;
-						continue;	  
+						continue;
 					}
 
 					seq_printf(s, "%8s[%2d] size(%d) %12p\n", "buffer", buffer_cnt++, buf_rec->buffer->size, buf_rec->buffer);
@@ -2864,7 +2977,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 					{
 						seq_printf(s, "  %s\n","<ADDRESS_ALLOCATION_LIST>");
 					}
-			
+
 					while (!!adr_rec) {
                                                 seq_printf(s, "%8s [%d] - %20s [0x%x] - [0x%x] %10s [%d]\n",
 								"Process", adr_rec->tracking_info.recordID.pid,
@@ -2879,7 +2992,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
                                         {
 						seq_printf(s, "  %s\n","<ADDRESS_FREE_LIST>");
 					}
-			
+
                                         while (!!adr_rec_free) {
         					seq_printf(s, "%8s [%d] - %20s [0x%x] - [0x%x] %10s [%d]\n",
                                                                 "Process", adr_rec_free->tracking_info.recordID.pid,
@@ -2906,12 +3019,12 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 					/* FD */
 					fd_rec = ion_get_list(LIST_PROCESS,process_rec, FD_ALLOCATION_LIST);
 					//fd_rec2 = ion_get_list(LIST_PROCESS,process_rec, FD_FREE_LIST);
-					if(fd_rec == NULL) 	
+					if(fd_rec == NULL)
 					{
 						process_rec = process_rec->next;
                                                 continue;
 					}
-					seq_printf(s, "[%2d] %8s[0x%x] [%d] group_id [%d]\n",process_cnt++, "process",(unsigned int)process_rec, process_rec->pid,process_rec->group_id);	
+					seq_printf(s, "[%2d] %8s[0x%x] [%d] group_id [%d]\n",process_cnt++, "process",(unsigned int)process_rec, process_rec->pid,process_rec->group_id);
 					if(fd_rec != NULL)
                                         {
                                                 seq_printf(s, "  %s\n","<FD_ALLOCATION_LIST>");
@@ -2930,7 +3043,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 						/* Next fd record */
 						fd_rec = (struct ion_fd_usage_record *)ion_get_data_from_record((void *)fd_rec, RECORD_NEXT);
 					}
-				#if 0	
+				#if 0
 					if(fd_rec2 != NULL)
                                         {
                                                 seq_printf(s, "  %s\n","<FD_FREE_LIST>");
@@ -2953,36 +3066,36 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 			break;
 		case DBIS_PIDS:
 			printk(KERN_INFO "DBIS_PIDS\n");
-			{ 
+			{
 				struct dbis_process_entry proclist = {.pid = -1, .clients = NULL, .next = NULL};
 				struct dbis_process_entry *pe = NULL;
 				struct dbis_client_entry *ce = NULL;
-				struct ion_process_record *current_process_rec = NULL;	
+				struct ion_process_record *current_process_rec = NULL;
 				struct ion_client_usage_record *current_client_rec = NULL;
 				struct ion_fd_usage_record *current_fd_usage_rec = NULL;
 				struct ion_address_usage_record *current_mmap_usage_rec = NULL;
-				process_rec = ion_get_inuse_process_usage_record2();		
+				process_rec = ion_get_inuse_process_usage_record2();
 				/* Firstly, we should go through all clients. */
 				for (cn = rb_first(&dev->clients); cn; cn = rb_next(cn)) {
 					client = rb_entry(cn, struct ion_client, node);
 					dbis_insert_proc_clients(&proclist, client, client->pid);
 				}
-				
+
 				/* Now we can go through all processes using ION. */
 				pe = proclist.next;
-			
+
 				while (pe != NULL) {
 					seq_printf(s, "%s[%d]\n","Process", pe->pid);
 					current_process_rec = process_rec;
 					while (current_process_rec != NULL) {
-                                        	if(current_process_rec->pid == pe->pid)
+						if (current_process_rec->pid == pe->pid)
                                         	{
 							printk("found process pid %d in record\n",current_process_rec->pid);
                                                		break;
                                         	}
                                         	current_process_rec = current_process_rec->next;
                                 	}
-					if(current_process_rec == NULL)
+					if (current_process_rec == NULL)
 					{
 						seq_printf(s, "ERROR!!!! can't find process pid %d in record \n",pe->pid);
 						printk("ERROR!!!! can't find process pid %d in record\n",pe->pid);
@@ -2990,7 +3103,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 					}
 					/* Go through all clients for this pe */
 					ce = pe->clients;
-									
+
 					while (ce != NULL) {
 						client = ce->client;
 						current_client_rec = (struct ion_client_usage_record *)client_rec;
@@ -3004,7 +3117,7 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 							current_client_rec = (struct ion_client_usage_record *)current_client_rec->next;
 						}
 						/* Show all client information */
-						if(current_client_rec != NULL)
+						if (current_client_rec != NULL)
 						{
 							seq_printf(s, "\n%8s[%2d] %12p fd[%d]\n", "client", client_cnt++, client,current_client_rec->fd);
 						}
@@ -3020,19 +3133,19 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 							/* All client-handle-buffers */
 							buffer = handle->buffer;
 							current_fd_usage_rec = current_process_rec->fd_using_list;
-							while(current_fd_usage_rec != NULL)
+							while (current_fd_usage_rec != NULL)
 							{
 								if((current_fd_usage_rec->buffer == buffer) && (current_fd_usage_rec->handle == handle))
 								{
 									break;
-								}	
-								current_fd_usage_rec = (struct ion_fd_usage_record *)current_fd_usage_rec->next;	
+								}
+								current_fd_usage_rec = (struct ion_fd_usage_record *)current_fd_usage_rec->next;
 							}
 							mutex_lock(&buffer->lock);
-							if(current_fd_usage_rec != NULL)
+							if (current_fd_usage_rec != NULL)
 							{
 								seq_printf(s, "%14s[%2d] fd(%d) heap(%s) ref_count(%d)flags(%d) buffer(0x%x) addr(0x%x) size(%d) \n",
-									"--buffer", buffer_cnt++,current_fd_usage_rec->fd, buffer->heap->name,(int)atomic_read(&buffer->ref.refcount),(int)buffer->flags, 
+									"--buffer", buffer_cnt++,current_fd_usage_rec->fd, buffer->heap->name,(int)atomic_read(&buffer->ref.refcount),(int)buffer->flags,
 									(unsigned int)buffer,(unsigned int)buffer->vaddr,(int)buffer->size );
 							}
 							else
@@ -3043,18 +3156,18 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 							}
 							mutex_unlock(&buffer->lock);
 							current_mmap_usage_rec = current_process_rec->address_using_list;
-                                                        while(current_mmap_usage_rec != NULL)
+                                                        while (current_mmap_usage_rec != NULL)
                                                         {
-                                                                if(current_mmap_usage_rec->buffer == buffer)
-                                                                {
+								if(current_mmap_usage_rec->buffer == buffer)
+								{
 									seq_printf(s,"%16s mapping address[0x%x - 0x%x] size(%d)\n","----buffer",current_mmap_usage_rec->mapping_address,current_mmap_usage_rec->mapping_address+current_mmap_usage_rec->size,current_mmap_usage_rec->size);
-                                                                }
-                                                                current_mmap_usage_rec = current_mmap_usage_rec->next;
-                                                        }
+								}
+								current_mmap_usage_rec = current_mmap_usage_rec->next;
+							}
 						}
 						mutex_unlock(&client->lock);
 						buffer_cnt = 0;
-						
+
 						/* Next ce */
 						ce = ce->next;
 					}
@@ -3074,7 +3187,6 @@ static int ion_debug_dbis_show(struct seq_file *s, void *unused)
 		default:
 			break;
 	}
-
 
 	return 0;
 }
@@ -3101,43 +3213,43 @@ static void ion_debug_create_db(struct dentry *root)
 
 	/* Create ion_statistics folder & its children */
 	debug_db_root.ion_statistics = debugfs_create_dir("ion_statistics", root);
-	for (index = 0; index <= _TOTAL_DBIS; ++index) 
+	for (index = 0; index <= _TOTAL_DBIS; ++index)
 	{
-		if (dbis_child_attr[index].attr == DBIS_FILE) 
+		if (dbis_child_attr[index].attr == DBIS_FILE)
 		{
-			debug_db_root.dbis.child[index] 
-				= debugfs_create_file(dbis_child_attr[index].name, 0444, debug_db_root.ion_statistics,(void *)index, &debug_dbis_fops);
-		} 
-		else 
+			debug_db_root.dbis.child[index]
+				= debugfs_create_file(dbis_child_attr[index].name, 0444, debug_db_root.ion_statistics, (void *)index, &debug_dbis_fops);
+		}
+		else
 		{/* This is only for history now. */
 			debug_db_root.dbis.child[index] = debugfs_create_dir(dbis_child_attr[index].name, debug_db_root.ion_statistics);
 #if 0
 			 for (his_index = 0; his_index < _TOTAL_DBIS; ++his_index) {
 				debug_db_root.dbis.history_record[his_index]
-                                = debugfs_create_file(dbis_child_attr[index+his_index+1].name, 0444, debug_db_root.dbis.child[index], his_index+index+1, &debug_dbis_fops);
-			}	
+				= debugfs_create_file(dbis_child_attr[index+his_index+1].name, 0444, debug_db_root.dbis.child[index], his_index+index+1, &debug_dbis_fops);
+			}
 #endif
 			/* client - Use (DBIS_CLIENTS + DBIS_DIR) to identify history/clients */
-                        debug_db_root.dbis.history_record[0]
-                                = debugfs_create_file(dbis_child_attr[DBIS_CLIENTS].name, 0444,
-                                                debug_db_root.dbis.child[index], (void *)(DBIS_CLIENTS + DBIS_DIR), &debug_dbis_fops);
+			debug_db_root.dbis.history_record[0]
+				= debugfs_create_file(dbis_child_attr[DBIS_CLIENTS].name, 0444,
+						debug_db_root.dbis.child[index], (void *)(DBIS_CLIENTS + DBIS_DIR), &debug_dbis_fops);
 
 			/* buffers - Use (DBIS_BUFFERS + DBIS_DIR) to identify history/buffers */
 			debug_db_root.dbis.history_record[1]
-				= debugfs_create_file(dbis_child_attr[DBIS_BUFFERS].name, 0444, 
+				= debugfs_create_file(dbis_child_attr[DBIS_BUFFERS].name, 0444,
 						debug_db_root.dbis.child[index], (void *)(DBIS_BUFFERS + DBIS_DIR), &debug_dbis_fops);
 			/* mmaps - Use (DBIS_MMAPS + DBIS_DIR) to identify history/mmaps */
 			debug_db_root.dbis.history_record[2]
-				= debugfs_create_file(dbis_child_attr[DBIS_MMAPS].name, 0444, 
+				= debugfs_create_file(dbis_child_attr[DBIS_MMAPS].name, 0444,
 						debug_db_root.dbis.child[index], (void *)(DBIS_MMAPS + DBIS_DIR), &debug_dbis_fops);
 			/* fds - Use (DBIS_fdS + DBIS_DIR) to identify history/fds */
 			debug_db_root.dbis.history_record[3]
-				= debugfs_create_file(dbis_child_attr[DBIS_FDS].name, 0444, 
+				= debugfs_create_file(dbis_child_attr[DBIS_FDS].name, 0444,
 						debug_db_root.dbis.child[index], (void *)(DBIS_FDS + DBIS_DIR), &debug_dbis_fops);
 			/* pids - Use (DBIS_PIDS + DBIS_DIR) to identify history/pids */
-                        debug_db_root.dbis.history_record[4]
-                                = debugfs_create_file(dbis_child_attr[DBIS_PIDS].name, 0444,
-                                                debug_db_root.dbis.child[index], (void *)(DBIS_PIDS + DBIS_DIR), &debug_dbis_fops);
+			debug_db_root.dbis.history_record[4]
+				= debugfs_create_file(dbis_child_attr[DBIS_PIDS].name, 0444,
+						debug_db_root.dbis.child[index], (void *)(DBIS_PIDS + DBIS_DIR), &debug_dbis_fops);
 		}
 	}
 }
@@ -3148,7 +3260,7 @@ static void ion_debug_db_create_clentry(pid_t pid)
 	struct dbcl_child *found;
 	char process_id[6];
 	int index;
-	
+
 	/* Check whether pid is in the cl list*/
 	list_for_each_safe(pos, n, &debug_db_root.dbcl.child) {
 		found = list_entry(pos, struct dbcl_child, entry);
@@ -3173,9 +3285,9 @@ static void ion_debug_db_create_clentry(pid_t pid)
 
 static void ion_debug_db_destroy_clentry(pid_t pid)
 {
-        struct list_head *pos, *n;
+	struct list_head *pos, *n;
 	struct dbcl_child *found;
-	
+
 	/* Check whether pid is in the cl list*/
 	list_for_each_safe(pos, n, &debug_db_root.dbcl.child) {
 		found = list_entry(pos, struct dbcl_child, entry);
