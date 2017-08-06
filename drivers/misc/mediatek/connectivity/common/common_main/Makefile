@@ -1,3 +1,5 @@
+ccflags-y += -I$(srctree)/include/linux
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/mach/$(MTK_PLATFORM)/include/mach
 subdir-ccflags-y += \
 	-I$(src)/linux/include \
 	-I$(src)/linux/pri/include \

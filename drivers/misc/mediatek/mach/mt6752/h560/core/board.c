@@ -110,16 +110,6 @@ void mt_power_off(void)
     }
 }
 
-/*=======================================================================*/
-/* Board Specific Devices                                                */
-/*=======================================================================*/
-/*GPS driver*/
-/*FIXME: remove mt3326 notation */
-struct mt3326_gps_hardware mt3326_gps_hw = {
-    .ext_power_on =  NULL,
-    .ext_power_off = NULL,
-};
-
 
 #if defined(CONFIG_MTK_WCN_CMB_SDIO_SLOT)
 static void mtk_wcn_cmb_sdio_enable_eirq(void)
@@ -287,58 +277,7 @@ static void mtk_wcn_cmb_sdio_off (int sdio_port_num) {
     mt_set_gpio_pull_select(mtk_wcn_cmb_sdio_eint_pin, GPIO_PULL_UP);
     mt_set_gpio_pull_enable(mtk_wcn_cmb_sdio_eint_pin, GPIO_PULL_ENABLE);
 }
-int board_sdio_ctrl (unsigned int sdio_port_num, unsigned int on) {
-#if defined(CONFIG_MTK_WCN_CMB_SDIO_SLOT)
-			sdio_port_num = CONFIG_MTK_WCN_CMB_SDIO_SLOT;
-			printk(KERN_WARNING "mt_combo_sdio_ctrl: force set sdio port to (%d)\n", sdio_port_num);
-#endif
-    if ((sdio_port_num >= 4) || (combo_port_pwr_map[sdio_port_num] == 0xFF) ) {
-        /* invalid sdio port number or slot mapping */
-        printk(KERN_WARNING "mt_mtk_wcn_cmb_sdio_ctrl invalid port(%d, %d)\n", sdio_port_num, combo_port_pwr_map[sdio_port_num]);
-        return -1;
-    }
-    /*printk(KERN_INFO "mt_mtk_wcn_cmb_sdio_ctrl (%d, %d)\n", sdio_port_num, on);*/
 
-    if (!combo_port_pwr_map[sdio_port_num] && on) {
-    	#if 1
-    	  printk(KERN_WARNING  "board_sdio_ctrl force off before on\n");
-        mtk_wcn_cmb_sdio_off(sdio_port_num);
-      #else
-      	printk(KERN_WARNING  "skip sdio off before on\n");
-     	#endif
-        combo_port_pwr_map[sdio_port_num] = 0;
-        /* off -> on */
-        mtk_wcn_cmb_sdio_on(sdio_port_num);
-        combo_port_pwr_map[sdio_port_num] = 1;
-    }
-    else if (combo_port_pwr_map[sdio_port_num] && !on) {
-        /* on -> off */
-        mtk_wcn_cmb_sdio_off(sdio_port_num);
-        combo_port_pwr_map[sdio_port_num] = 0;
-    }
-    else {
-        return -2;
-    }
-    return 0;
-}
-EXPORT_SYMBOL(board_sdio_ctrl);
-
-int mtk_wcn_sdio_irq_flag_set (int flag)
-{
-
-    if (0 != flag)
-    {
-        atomic_set(&sdio_irq_enable_flag, 1);
-    }
-    else
-    {
-        atomic_set(&sdio_irq_enable_flag, 0);
-    }
-    printk(KERN_INFO  "sdio_irq_enable_flag:%d\n", atomic_read(&sdio_irq_enable_flag));
-
-    return atomic_read(&sdio_irq_enable_flag);
-}
-EXPORT_SYMBOL(mtk_wcn_sdio_irq_flag_set);
 //#endif /* end of  defined(CONFIG_MTK_COMBO) || defined(CONFIG_MTK_COMBO_MODULE) */
 #endif /* end of defined(CONFIG_MTK_WCN_CMB_SDIO_SLOT) */
 /*=======================================================================*/

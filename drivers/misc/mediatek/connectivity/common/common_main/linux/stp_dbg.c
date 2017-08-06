@@ -700,6 +700,7 @@ INT32 stp_dbg_trigger_collect_ftrace(PUINT8 pbuf, INT32 len)
 	return 0;
 }
 
+/*
 #if BTIF_RXD_BE_BLOCKED_DETECT
 MTK_WCN_BOOL stp_dbg_is_btif_rxd_be_blocked(VOID)
 {
@@ -710,7 +711,7 @@ MTK_WCN_BOOL stp_dbg_is_btif_rxd_be_blocked(VOID)
 	return flag;
 }
 #endif
-
+*/
 static _osal_inline_ INT32 stp_dbg_gzip_compressor(PVOID worker, PUINT8 in_buf, INT32 in_sz, PUINT8 out_buf,
 				 PINT32 out_sz, INT32 finish)
 {
@@ -1468,7 +1469,7 @@ static _osal_inline_ VOID stp_dbg_nl_init(VOID)
 
 	}
 #endif
-	if (genl_register_family_with_ops(&stp_dbg_gnl_family, stp_dbg_gnl_ops_array) != 0)
+	if (_genl_register_family_with_ops(&stp_dbg_gnl_family, stp_dbg_gnl_ops_array) != 0)
 		STP_DBG_ERR_FUNC("%s(): GE_NELINK family registration fail\n", __func__);
 }
 

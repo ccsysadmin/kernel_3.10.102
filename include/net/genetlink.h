@@ -130,6 +130,10 @@ static inline int genl_register_family(struct genl_family *family)
 	return __genl_register_family(family);
 }
 
+#define _genl_register_family_with_ops(family, ops)			\
+	genl_register_family_with_ops((family),			\
+					    (ops), ARRAY_SIZE(ops))
+
 extern int __genl_register_family_with_ops(struct genl_family *family,
 	struct genl_ops *ops, size_t n_ops);
 

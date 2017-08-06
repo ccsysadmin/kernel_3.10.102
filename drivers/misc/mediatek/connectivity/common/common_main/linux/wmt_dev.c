@@ -498,9 +498,9 @@ INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzB
 		return -2;
 	}
 
-	orig_uid = cred->fsuid.val;
-	orig_gid = cred->fsgid.val;
-	cred->fsuid.val = cred->fsgid.val = 0;
+	orig_uid = cred->fsuid;
+	orig_gid = cred->fsgid;
+	cred->fsuid = cred->fsgid = 0;
 
 	set_fs(get_ds());
 
@@ -508,8 +508,8 @@ INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzB
 	iRet = wmt_dev_read_file(pPatchName, (const PPUINT8)&pfw->data, 0, padSzBuf);
 	set_fs(orig_fs);
 
-	cred->fsuid.val = orig_uid;
-	cred->fsgid.val = orig_gid;
+	cred->fsuid = orig_uid;
+	cred->fsgid = orig_gid;
 
 	if (iRet > 0) {
 		pfw->size = iRet;

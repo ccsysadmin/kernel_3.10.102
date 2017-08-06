@@ -14,6 +14,10 @@
 # Connectivity combo driver
 # If KERNELRELEASE is defined, we've been invoked from the
 # kernel build system and can use its language.
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mach/mt6752/include/mach
+subdir-ccflags-y += -I$(srctree)/include/linux
+subdir-ccflags-y += -I$(srctree)/include/mach
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/btif/inc
 ifneq ($(KERNELRELEASE),)
 subdir-ccflags-y += -D MTK_WCN_REMOVE_KERNEL_MODULE
 ifeq ($(CONFIG_ARM64), y)
@@ -28,7 +32,7 @@ endif
     subdir-ccflags-y += -D MTK_WCN_WMT_STP_EXP_SYMBOL_ABSTRACT
 
     obj-y += common/
-    obj-$(CONFIG_MTK_COMBO_WIFI) += wlan/
+   obj-$(CONFIG_MTK_COMBO_WIFI) += drv_wlan/
     obj-$(CONFIG_MTK_COMBO_GPS) += gps/
     obj-$(CONFIG_MTK_COMBO_ANT) += ant/
     obj-$(CONFIG_MTK_FMRADIO) += fmradio/

@@ -338,9 +338,9 @@ INT32 stp_dbg_core_dump_deinit_gcoredump(VOID);
 INT32 stp_dbg_core_dump_flush(INT32 rst, MTK_WCN_BOOL coredump_is_timeout);
 INT32 stp_dbg_core_dump(INT32 dump_sink);
 INT32 stp_dbg_trigger_collect_ftrace(PUINT8 pbuf, INT32 len);
-#if BTIF_RXD_BE_BLOCKED_DETECT
-MTK_WCN_BOOL stp_dbg_is_btif_rxd_be_blocked(VOID);
-#endif
+//#if BTIF_RXD_BE_BLOCKED_DETECT
+//MTK_WCN_BOOL stp_dbg_is_btif_rxd_be_blocked(VOID);
+//#endif
 INT32 stp_dbg_enable(MTKSTP_DBG_T *stp_dbg);
 INT32 stp_dbg_disable(MTKSTP_DBG_T *stp_dbg);
 INT32 stp_dbg_dmp_print(MTKSTP_DBG_T *stp_dbg);

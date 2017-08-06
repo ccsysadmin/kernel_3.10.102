@@ -50,8 +50,8 @@ obj-y	+= aee/
 obj-$(CONFIG_MTK_EMI_MPU)	+= emi_mpu/
 obj-$(CONFIG_MTK_EMI_BWL)	+= emi_bwl/
 
-obj-$(CONFIG_MTK_FMRADIO)	+= fmradio/
-obj-$(CONFIG_MTK_GPS)	    += gps/
+#obj-$(CONFIG_MTK_FMRADIO)	+= fmradio/
+#obj-$(CONFIG_MTK_GPS)	    += gps/
 
 obj-y	+= m4u/
 #obj-y	+= mhl/

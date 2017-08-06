@@ -126,10 +126,10 @@ INT32 stp_notify_btm_dump(MTKSTP_BTM_T *stp_btm);
 INT32 stp_notify_btm_do_fw_assert(MTKSTP_BTM_T *stp_btm);
 INT32 stp_notify_btm_handle_wmt_lte_coex(MTKSTP_BTM_T *stp_btm);
 INT32 wcn_psm_flag_trigger_collect_ftrace(void);
-#if BTIF_RXD_BE_BLOCKED_DETECT
-INT32 wcn_btif_rxd_blocked_collect_ftrace(void);
-MTK_WCN_BOOL is_btif_rxd_be_blocked(void);
-#endif
+//#if BTIF_RXD_BE_BLOCKED_DETECT
+//INT32 wcn_btif_rxd_blocked_collect_ftrace(void);
+//MTK_WCN_BOOL is_btif_rxd_be_blocked(void);
+//#endif
 
 INT32 wmt_btm_trigger_reset(VOID);
 INT32 stp_btm_set_current_op(MTKSTP_BTM_T *stp_btm, P_OSAL_OP pOp);
