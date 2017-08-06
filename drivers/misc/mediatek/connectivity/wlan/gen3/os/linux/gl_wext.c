@@ -1388,7 +1388,7 @@ wext_get_scan(IN struct net_device *prNetDev,
 		if ((pcCur + iwEvent.len) > pcEnd)
 			break;
 		iwEvent.u.ap_addr.sa_family = ARPHRD_ETHER;
-		ether_addr_copy(iwEvent.u.ap_addr.sa_data, prBss->arMacAddress);
+		memcpy(iwEvent.u.ap_addr.sa_data, prBss->arMacAddress,ETH_ALEN);
 		memcpy(pcCur, &iwEvent, IW_EV_ADDR_LEN);
 		pcCur += IW_EV_ADDR_LEN;
 
@@ -3547,7 +3547,7 @@ wext_indicate_wext_event(IN P_GLUE_INFO_T prGlueInfo,
 
 	case SIOCGIWAP:
 		if (pucData)
-			ether_addr_copy(wrqu.ap_addr.sa_data, pucData);
+			memcpy(wrqu.ap_addr.sa_data, pucData,ETH_ALEN);
 		else
 			memset(&wrqu.ap_addr.sa_data, 0, ETH_ALEN);
 		break;

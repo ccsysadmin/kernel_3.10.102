@@ -45,6 +45,8 @@
 #ifdef FW_CFG_SUPPORT
 #include "fwcfg.h"
 #endif
+
+
 /*******************************************************************************
 *                              C O N S T A N T S
 ********************************************************************************
@@ -509,6 +511,8 @@ static const struct wiphy_wowlan_support mtk_wlan_wowlan_support = {
 * \return (none)
 */
 /*----------------------------------------------------------------------------*/
+#endif
+
 unsigned int _cfg80211_classify8021d(struct sk_buff *skb)
 {
 	unsigned int dscp = 0;
@@ -528,15 +532,13 @@ unsigned int _cfg80211_classify8021d(struct sk_buff *skb)
 	}
 	return dscp >> 5;
 }
-#endif
 
-UINT_16 wlanSelectQueue(struct net_device *dev, struct sk_buff *skb,
-			void *accel_priv, select_queue_fallback_t fallback)
+UINT_16 wlanSelectQueue(struct net_device *dev, struct sk_buff *skb)
 {
 	UINT_16 au16Wlan1dToQueueIdx[8] = { 1, 0, 0, 1, 2, 2, 3, 3 };
 
 	/* Use Linux wireless utility function */
-	skb->priority = cfg80211_classify8021d(skb, NULL);
+	skb->priority = _cfg80211_classify8021d(skb);
 
 	return au16Wlan1dToQueueIdx[skb->priority];
 }
@@ -1193,7 +1195,7 @@ void wlanMonWorkHandler(struct work_struct *work)
 
 		prGlueInfo->prMonDevHandler =
 		    alloc_netdev_mq(sizeof(NETDEV_PRIVATE_GLUE_INFO), NIC_MONITOR_INF_NAME,
-					NET_NAME_PREDICTABLE, ether_setup, CFG_MAX_TXQ_NUM);
+					 ether_setup, CFG_MAX_TXQ_NUM);
 
 		if (prGlueInfo->prMonDevHandler == NULL) {
 			DBGLOG(INIT, ERROR, "wlanMonWorkHandler: Allocated prMonDevHandler context FAIL.\n");
@@ -1419,7 +1421,7 @@ static void createWirelessDevice(void)
 	prWiphy->n_cipher_suites = ARRAY_SIZE(mtk_cipher_suites);
 	prWiphy->flags = WIPHY_FLAG_SUPPORTS_FW_ROAM | WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL |
 		WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
-	prWiphy->regulatory_flags = REGULATORY_CUSTOM_REG;
+//	prWiphy->regulatory_flags = REGULATORY_CUSTOM_REG;
 #if CFG_SUPPORT_TDLS
 	TDLSEX_WIPHY_FLAGS_INIT(prWiphy->flags);
 	prWiphy->flags |= WIPHY_FLAG_SUPPORTS_FW_ROAM |
@@ -1432,10 +1434,6 @@ static void createWirelessDevice(void)
 	prWiphy->vendor_events = mtk_wlan_vendor_events;
 	prWiphy->n_vendor_events = ARRAY_SIZE(mtk_wlan_vendor_events);
 
-	/* 4 <1.4> wowlan support */
-#ifdef CONFIG_PM
-	prWiphy->wowlan = &mtk_wlan_wowlan_support;
-#endif
 #ifdef CONFIG_CFG80211_WEXT
 	/* 4 <1.5> Use wireless extension to replace IOCTL */
 	prWiphy->wext = &wext_handler_def;
@@ -1529,7 +1527,7 @@ static struct wireless_dev *wlanNetCreate(PVOID pvData)
 	/* 4 <3> Initialize Glue structure */
 	/* 4 <3.1> Create net device */
 	prGlueInfo->prDevHandler = alloc_netdev_mq(sizeof(NETDEV_PRIVATE_GLUE_INFO), NIC_INF_NAME,
-						   NET_NAME_PREDICTABLE, ether_setup, CFG_MAX_TXQ_NUM);
+						    ether_setup, CFG_MAX_TXQ_NUM);
 	if (!prGlueInfo->prDevHandler) {
 		DBGLOG(INIT, ERROR, "Allocating memory to net_device context failed\n");
 		goto netcreate_err;
@@ -2041,9 +2039,9 @@ bailout:
 				DBGLOG(INIT, WARN, "set MAC addr fail 0x%x\n", rStatus);
 				prGlueInfo->u4ReadyFlag = 0;
 			} else {
-				ether_addr_copy(prGlueInfo->prDevHandler->dev_addr, MacAddr.sa_data);
-				ether_addr_copy(prGlueInfo->prDevHandler->perm_addr,
-				       prGlueInfo->prDevHandler->dev_addr);
+				memcpy(prGlueInfo->prDevHandler->dev_addr, MacAddr.sa_data,ETH_ALEN);
+				memcpy(prGlueInfo->prDevHandler->perm_addr,
+				       prGlueInfo->prDevHandler->dev_addr,ETH_ALEN);
 
 				/* card is ready */
 				prGlueInfo->u4ReadyFlag = 1;

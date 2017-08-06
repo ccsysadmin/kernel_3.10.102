@@ -1040,7 +1040,7 @@ BOOLEAN kalInitBowDevice(IN P_GLUE_INFO_T prGlueInfo, IN const char *prDevName)
 	if (prGlueInfo->rBowInfo.fgIsNetRegistered == FALSE) {
 		prGlueInfo->rBowInfo.prDevHandler =
 		    alloc_netdev_mq(sizeof(P_GLUE_INFO_T), prDevName,
-		    NET_NAME_PREDICTABLE, ether_setup, CFG_MAX_TXQ_NUM);
+		     ether_setup, CFG_MAX_TXQ_NUM);
 
 		if (!prGlueInfo->rBowInfo.prDevHandler)
 			return FALSE;
@@ -1054,9 +1054,9 @@ BOOLEAN kalInitBowDevice(IN P_GLUE_INFO_T prGlueInfo, IN const char *prDevName)
 		/* 1.2 fill hardware address */
 		COPY_MAC_ADDR(rMacAddr, prAdapter->rMyMacAddr);
 		rMacAddr[0] |= 0x2;	/* change to local administrated address */
-		ether_addr_copy(prGlueInfo->rBowInfo.prDevHandler->dev_addr, rMacAddr);
-		ether_addr_copy(prGlueInfo->rBowInfo.prDevHandler->perm_addr,
-		       prGlueInfo->rBowInfo.prDevHandler->dev_addr);
+		memcpy(prGlueInfo->rBowInfo.prDevHandler->dev_addr, rMacAddr,ETH_ALEN);
+		memcpy(prGlueInfo->rBowInfo.prDevHandler->perm_addr,
+		       prGlueInfo->rBowInfo.prDevHandler->dev_addr,ETH_ALEN);
 
 		/* 1.3 register callback functions */
 		prGlueInfo->rBowInfo.prDevHandler->netdev_ops = &bow_netdev_ops;

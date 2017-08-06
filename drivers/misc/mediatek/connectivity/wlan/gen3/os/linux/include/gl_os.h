@@ -166,7 +166,7 @@
 #include "wlan_oid.h"
 
 #if CFG_ENABLE_AEE_MSG
-#include <mt-plat/aee.h>
+#include <aee.h>
 #endif
 
 extern BOOLEAN fgIsBusAccessFailed;
@@ -848,8 +848,7 @@ BOOLEAN glUnregisterAmpc(P_GLUE_INFO_T prGlueInfo);
 
 P_GLUE_INFO_T wlanGetGlueInfo(VOID);
 
-UINT_16 wlanSelectQueue(struct net_device *dev, struct sk_buff *skb,
-			void *accel_priv, select_queue_fallback_t fallback);
+UINT_16 wlanSelectQueue(struct net_device *dev, struct sk_buff *skb);
 
 VOID wlanDebugInit(VOID);
 

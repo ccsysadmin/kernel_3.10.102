@@ -715,7 +715,7 @@ BOOLEAN glRegisterP2P(P_GLUE_INFO_T prGlueInfo, const char *prDevName, BOOLEAN f
 	/* 3. allocate netdev */
 	prGlueInfo->prP2PInfo->prDevHandler =
 	    alloc_netdev_mq(sizeof(NETDEV_PRIVATE_GLUE_INFO), prDevName,
-				NET_NAME_PREDICTABLE, ether_setup, CFG_MAX_TXQ_NUM);
+				 ether_setup, CFG_MAX_TXQ_NUM);
 	if (!prGlueInfo->prP2PInfo->prDevHandler) {
 		DBGLOG(INIT, WARN, "unable to allocate netdevice for p2p\n");
 
@@ -731,8 +731,8 @@ BOOLEAN glRegisterP2P(P_GLUE_INFO_T prGlueInfo, const char *prDevName, BOOLEAN f
 	/* 4.2 fill hardware address */
 	COPY_MAC_ADDR(rMacAddr, prAdapter->rMyMacAddr);
 	rMacAddr[0] ^= 0x2;	/* change to local administrated address */
-	ether_addr_copy(prGlueInfo->prP2PInfo->prDevHandler->dev_addr, rMacAddr);
-	ether_addr_copy(prGlueInfo->prP2PInfo->prDevHandler->perm_addr, prGlueInfo->prP2PInfo->prDevHandler->dev_addr);
+	memcpy(prGlueInfo->prP2PInfo->prDevHandler->dev_addr, rMacAddr,ETH_ALEN);
+	memcpy(prGlueInfo->prP2PInfo->prDevHandler->perm_addr, prGlueInfo->prP2PInfo->prDevHandler->dev_addr,ETH_ALEN);
 
 	/* 4.3 register callback functions */
 	prGlueInfo->prP2PInfo->prDevHandler->netdev_ops = &p2p_netdev_ops;
@@ -834,7 +834,6 @@ BOOLEAN glP2pCreateWirelessDevice(P_GLUE_INFO_T prGlueInfo)
 	prWiphy->cipher_suites = mtk_cipher_suites;
 	prWiphy->n_cipher_suites = ARRAY_SIZE(mtk_cipher_suites);
 	prWiphy->flags = WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL | WIPHY_FLAG_HAVE_AP_SME;
-	prWiphy->regulatory_flags = REGULATORY_CUSTOM_REG;
 	prWiphy->ap_sme_capa = 1;
 
 	prWiphy->max_scan_ssids = MAX_SCAN_LIST_NUM;
@@ -843,9 +842,6 @@ BOOLEAN glP2pCreateWirelessDevice(P_GLUE_INFO_T prGlueInfo)
 	prWiphy->vendor_commands = mtk_p2p_vendor_ops;
 	prWiphy->n_vendor_commands = sizeof(mtk_p2p_vendor_ops) / sizeof(struct wiphy_vendor_command);
 
-#ifdef CONFIG_PM
-	prWiphy->wowlan = &mtk_p2p_wowlan_support;
-#endif
 
 	/* 2.1 set priv as pointer to glue structure */
 	*((P_GLUE_INFO_T *) wiphy_priv(prWiphy)) = prGlueInfo;

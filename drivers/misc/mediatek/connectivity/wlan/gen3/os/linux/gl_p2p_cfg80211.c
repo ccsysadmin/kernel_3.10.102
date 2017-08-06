@@ -154,7 +154,7 @@ mtk_p2p_cfg80211_add_iface(struct wiphy *wiphy,
 
 		*((P_GLUE_INFO_T *) netdev_priv(prNewNetDevice)) = prGlueInfo;
 
-		ether_addr_copy(prNewNetDevice->perm_addr, prGlueInfo->prAdapter->rWifiVar.aucInterfaceAddress);
+		memcpy(prNewNetDevice->perm_addr, prGlueInfo->prAdapter->rWifiVar.aucInterfaceAddress,ETH_ALEN);
 		prNewNetDevice->dev_addr = prNewNetDevice->perm_addr;
 
 		prNewNetDevice->netdev_ops = &p2p_netdev_ops;
@@ -1137,42 +1137,26 @@ int mtk_p2p_cfg80211_cancel_remain_on_channel(struct wiphy *wiphy,
 }				/* mtk_p2p_cfg80211_cancel_remain_on_channel */
 
 int mtk_p2p_cfg80211_mgmt_tx(struct wiphy *wiphy,
-				struct wireless_dev *wdev,
-				struct cfg80211_mgmt_tx_params *params,
-				u64 *cookie)
+			     struct wireless_dev *wdev,
+			     struct ieee80211_channel *chan, bool offchan,
+			     unsigned int wait, const u8 *buf, size_t len,
+			     bool no_cck, bool dont_wait_for_ack, u64 *cookie)
 {
 	P_GLUE_INFO_T prGlueInfo = (P_GLUE_INFO_T) NULL;
 	P_GL_P2P_INFO_T prGlueP2pInfo = (P_GL_P2P_INFO_T) NULL;
 	INT_32 i4Rslt = -EINVAL;
-	struct _MSG_P2P_EXTEND_LISTEN_INTERVAL_T *prMsgExtListenReq = NULL;
 	P_MSG_P2P_MGMT_TX_REQUEST_T prMsgTxReq = (P_MSG_P2P_MGMT_TX_REQUEST_T) NULL;
 	P_MSDU_INFO_T prMgmtFrame = (P_MSDU_INFO_T) NULL;
 	PUINT_8 pucFrameBuf = (PUINT_8) NULL;
-	PUINT_64 pu8GlCookie = (PUINT_64) NULL;
-	UINT_8 ucRoleIdx = 0, ucBssIdx = 0;
-	struct net_device *dev = NULL;
 
 	do {
-		if ((wiphy == NULL) || (wdev == NULL) || (params == 0) || (cookie == NULL))
+		if ((wiphy == NULL) || (buf == NULL) || (len == 0) || 
+				(wdev == NULL) || (cookie == NULL))
 			break;
-
-		DBGLOG(P2P, INFO, "mtk_p2p_cfg80211_mgmt_tx\n");
+		/* DBGLOG(P2P, TRACE, ("mtk_p2p_cfg80211_mgmt_tx\n")); */
 
 		prGlueInfo = *((P_GLUE_INFO_T *) wiphy_priv(wiphy));
 		prGlueP2pInfo = prGlueInfo->prP2PInfo;
-
-		dev = wdev->netdev;
-		if (mtk_Netdev_To_RoleIdx(prGlueP2pInfo, dev, &ucRoleIdx) < 0) {
-			/* Device Interface. */
-			ucBssIdx = P2P_DEV_BSS_INDEX;
-		} else {
-			ASSERT(ucRoleIdx < KAL_P2P_NUM);
-			/* Role Interface. */
-			if (p2pFuncRoleToBssIdx(prGlueInfo->prAdapter, ucRoleIdx, &ucBssIdx) != WLAN_STATUS_SUCCESS) {
-				/* Can't find BSS index. */
-				break;
-			}
-		}
 
 		*cookie = prGlueP2pInfo->u8Cookie++;
 
@@ -1185,59 +1169,26 @@ int mtk_p2p_cfg80211_mgmt_tx(struct wiphy *wiphy,
 			break;
 		}
 
-		if (params->offchan) {
-			DBGLOG(P2P, INFO, "   Off channel TRUE\n");
-			prMsgTxReq->fgIsOffChannel = TRUE;
+		prMsgTxReq->fgNoneCckRate = FALSE;
+		prMsgTxReq->fgIsWaitRsp = TRUE;
 
-			mtk_p2p_cfg80211func_channel_format_switch(params->chan,
-								   NL80211_CHAN_NO_HT,
-								   &prMsgTxReq->rChannelInfo, &prMsgTxReq->eChnlExt);
-		} else {
-			prMsgTxReq->fgIsOffChannel = FALSE;
-		}
-		/* Here need to extend the listen interval */
-		prMsgExtListenReq = cnmMemAlloc(prGlueInfo->prAdapter, RAM_TYPE_MSG,
-			sizeof(struct _MSG_P2P_EXTEND_LISTEN_INTERVAL_T));
-		if (prMsgExtListenReq) {
-			prMsgExtListenReq->rMsgHdr.eMsgId = MID_MNY_P2P_EXTEND_LISTEN_INTERVAL;
-			prMsgExtListenReq->wait = params->wait;
-			DBGLOG(P2P, INFO, "ext listen, wait: %d\n", prMsgExtListenReq->wait);
-			mboxSendMsg(prGlueInfo->prAdapter, MBOX_ID_0, (P_MSG_HDR_T)prMsgExtListenReq,
-				MSG_SEND_METHOD_BUF);
-		}
+		prMgmtFrame = cnmMgtPktAlloc(prGlueInfo->prAdapter, (UINT_32) (len + MAC_TX_RESERVED_FIELD));
 
-		if (params->no_cck)
-			prMsgTxReq->fgNoneCckRate = TRUE;
-		else
-			prMsgTxReq->fgNoneCckRate = FALSE;
-
-		if (params->dont_wait_for_ack)
-			prMsgTxReq->fgIsWaitRsp = FALSE;
-		else
-			prMsgTxReq->fgIsWaitRsp = TRUE;
-		prMgmtFrame =
-		    cnmMgtPktAlloc(prGlueInfo->prAdapter,
-				(INT_32) (params->len + sizeof(UINT_64) + MAC_TX_RESERVED_FIELD));
 		prMsgTxReq->prMgmtMsduInfo = prMgmtFrame;
 		if (prMsgTxReq->prMgmtMsduInfo == NULL) {
-			/* ASSERT(FALSE); */
+			ASSERT(FALSE);
 			i4Rslt = -ENOMEM;
 			break;
 		}
 
 		prMsgTxReq->u8Cookie = *cookie;
 		prMsgTxReq->rMsgHdr.eMsgId = MID_MNY_P2P_MGMT_TX;
-		prMsgTxReq->ucBssIdx = ucBssIdx;
 
 		pucFrameBuf = (PUINT_8) ((ULONG) prMgmtFrame->prPacket + MAC_TX_RESERVED_FIELD);
 
-		pu8GlCookie = (PUINT_64) ((ULONG) prMgmtFrame->prPacket + (ULONG)params->len + MAC_TX_RESERVED_FIELD);
+		kalMemCopy(pucFrameBuf, buf, len);
 
-		kalMemCopy(pucFrameBuf, params->buf, params->len);
-
-		*pu8GlCookie = *cookie;
-
-		prMgmtFrame->u2FrameLength = params->len;
+		prMgmtFrame->u2FrameLength = len;
 
 		mboxSendMsg(prGlueInfo->prAdapter, MBOX_ID_0, (P_MSG_HDR_T) prMsgTxReq, MSG_SEND_METHOD_BUF);
 
@@ -1252,7 +1203,7 @@ int mtk_p2p_cfg80211_mgmt_tx(struct wiphy *wiphy,
 	}
 
 	return i4Rslt;
-}				/* mtk_p2p_cfg80211_mgmt_tx */
+}				
 
 int mtk_p2p_cfg80211_mgmt_tx_cancel_wait(struct wiphy *wiphy,
 					 struct wireless_dev *wdev,

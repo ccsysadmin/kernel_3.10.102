@@ -1060,7 +1060,7 @@ kalIndicateStatusAndComplete(IN P_GLUE_INFO_T prGlueInfo, IN WLAN_STATUS eStatus
 
 				if ((prBssDesc != NULL) && (prChannel != NULL)) {
 					bss = cfg80211_inform_bss(priv_to_wiphy(prGlueInfo), prChannel,
-								CFG80211_BSS_FTYPE_PRESP,
+								WLAN_CAPABILITY_ESS,
 								arBssid, 0,	/* TSF */
 								WLAN_CAPABILITY_ESS,
 								prBssDesc->u2BeaconInterval,	/* beacon interval */
