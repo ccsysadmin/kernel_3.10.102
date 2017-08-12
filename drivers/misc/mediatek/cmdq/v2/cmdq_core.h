@@ -15,6 +15,7 @@
 #define __CMDQ_CORE_H__
 
 #include <linux/list.h>
+#include <linux/plist.h>
 #include <linux/time.h>
 #ifdef CMDQ_AEE_READY
 #include <linux/aee.h>

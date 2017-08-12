@@ -57,6 +57,18 @@
 /* #define CMDQ_ENABLE_BUS_ULTRA */
 
 
+/**
+ * Copied from latest linux/list.h
+ * list_last_entry - get the last element from a list
+ * @ptr:        the list head to take the element from.
+ * @type:       the type of the struct this is embedded in.
+ * @member:     the name of the list_struct within the struct.
+ *
+ * Note, that list is expected to be not empty.
+ */
+#define _list_last_entry(ptr, type, member) \
+	list_entry((ptr)->prev, type, member)
+
 #define CMDQ_GET_COOKIE_CNT(thread) (CMDQ_REG_GET32(CMDQ_THR_EXEC_CNT(thread)) & CMDQ_MAX_COOKIE_VALUE)
 #define CMDQ_SYNC_TOKEN_APPEND_THR(id)     (CMDQ_SYNC_TOKEN_APPEND_THR0 + id)
 
@@ -1056,7 +1068,7 @@ static dma_addr_t cmdq_core_task_get_eoc_pa(struct TaskStruct *pTask)
 		return 0;
 
 	/* Last buffer contains at least 2 instruction, offset directly. */
-	entry = list_last_entry(&pTask->cmd_buffer_list, struct CmdBufferStruct, listEntry);
+	entry = _list_last_entry(&pTask->cmd_buffer_list, struct CmdBufferStruct, listEntry);
 	return entry->MVABase + CMDQ_CMD_BUFFER_SIZE - pTask->buf_available_size - 2 * CMDQ_INST_SIZE;
 }
 
@@ -1102,7 +1114,7 @@ static dma_addr_t cmdq_core_task_get_last_pa(struct TaskStruct *pTask)
 
 	if (list_empty(&pTask->cmd_buffer_list))
 		return 0;
-	entry = list_last_entry(&pTask->cmd_buffer_list, struct CmdBufferStruct, listEntry);
+	entry = _list_last_entry(&pTask->cmd_buffer_list, struct CmdBufferStruct, listEntry);
 	return entry->MVABase;
 }
 
@@ -1112,7 +1124,7 @@ static uint32_t *cmdq_core_task_get_last_va(struct TaskStruct *pTask)
 
 	if (list_empty(&pTask->cmd_buffer_list))
 		return NULL;
-	entry = list_last_entry(&pTask->cmd_buffer_list, struct CmdBufferStruct, listEntry);
+	entry = _list_last_entry(&pTask->cmd_buffer_list, struct CmdBufferStruct, listEntry);
 	return entry->pVABase;
 }
 

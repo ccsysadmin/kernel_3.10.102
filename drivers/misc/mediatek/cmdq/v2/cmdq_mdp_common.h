@@ -177,9 +177,9 @@ extern "C" {
 
 	int32_t cmdqMdpClockOff(uint64_t engineFlag);
 
-	uint32_t cmdq_mdp_rdma_get_reg_offset_src_addr(void);
-	uint32_t cmdq_mdp_wrot_get_reg_offset_dst_addr(void);
-	uint32_t cmdq_mdp_wdma_get_reg_offset_dst_addr(void);
+	//uint32_t cmdq_mdp_rdma_get_reg_offset_src_addr(void);
+//	uint32_t cmdq_mdp_wrot_get_reg_offset_dst_addr(void);
+//	uint32_t cmdq_mdp_wdma_get_reg_offset_dst_addr(void);
 
 	void testcase_clkmgr_mdp(void);
 
