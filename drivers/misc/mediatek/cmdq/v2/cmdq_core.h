@@ -17,7 +17,7 @@
 #include <linux/list.h>
 #include <linux/time.h>
 #ifdef CMDQ_AEE_READY
-#include <mt-plat/aee.h>
+#include <linux/aee.h>
 #endif
 #include <linux/device.h>
 #include <linux/printk.h>

@@ -33,7 +33,7 @@
 #include <linux/of_address.h>
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
-#include <mt-plat/mt_lpae.h>
+#include <mach/mt_lpae.h>
 
 typedef struct CmdqDeviceStruct {
 	struct device *pDev;

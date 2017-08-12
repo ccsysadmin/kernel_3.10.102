@@ -39,7 +39,7 @@
 #include <linux/memory.h>
 #include <linux/ftrace.h>
 #ifdef CMDQ_MET_READY
-#include <mt-plat/met_drv.h>
+#include <linux/met_drv.h>
 #endif
 #include <linux/seq_file.h>
 #include <linux/kthread.h>
@@ -50,7 +50,7 @@
 #include <mach/mt_irq.h>
 #include "ddp_reg.h"
 #endif
-#include <mt-plat/mt_lpae.h>
+#include <mach/mt_lpae.h>
 
 /* #define CMDQ_PROFILE_COMMAND_TRIGGER_LOOP */
 /* #define CMDQ_APPEND_WITHOUT_SUSPEND */
